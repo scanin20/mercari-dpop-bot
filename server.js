@@ -1,4 +1,3 @@
-// server.js
 const express = require("express");
 const { runDpop } = require("./mercari_dpop");
 

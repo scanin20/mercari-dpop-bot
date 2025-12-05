@@ -1,5 +1,4 @@
 // mercari_dpop.js
-const chromium = require("@sparticuz/chromium");
 const puppeteer = require("puppeteer-core");
 
 const defaultTargetUrl =
@@ -15,16 +14,19 @@ async function runDpop(targetUrl = defaultTargetUrl, storeUrl = defaultStoreUrl)
   console.log("Target URL:", targetUrl);
   console.log("Store URL:", storeUrl);
 
-  // Path al binario chromium fornito da @sparticuz/chromium
-  const executablePath = await chromium.executablePath();
+  const executablePath =
+    process.env.PUPPETEER_EXECUTABLE_PATH || "/usr/bin/chromium";
 
-  console.log("Chromium executablePath:", executablePath);
+  console.log("Using Chromium at:", executablePath);
 
   const browser = await puppeteer.launch({
     executablePath,
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    headless: chromium.headless
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
   });
 
   const page = await browser.newPage();
@@ -41,7 +43,6 @@ async function runDpop(targetUrl = defaultTargetUrl, storeUrl = defaultStoreUrl)
   page.on("request", async request => {
     const url = request.url();
 
-    // log minimale per capire se vediamo qualcosa
     if (url.includes("entities:search")) {
       console.log("[REQ] entities:search:", url);
 
@@ -77,7 +78,6 @@ async function runDpop(targetUrl = defaultTargetUrl, storeUrl = defaultStoreUrl)
     console.error("Errore goto Mercari:", err.message);
   }
 
-  // Aspetto un po' che partano le XHR
   await new Promise(r => setTimeout(r, 15000));
 
   await browser.close();
