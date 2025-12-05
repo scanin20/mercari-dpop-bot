@@ -1,4 +1,6 @@
 // mercari_dpop.js
+const chromium = require("@sparticuz/chromium");
+const puppeteer = require("puppeteer-core");
 
 const defaultTargetUrl =
   process.env.MERCARI_URL ||
@@ -9,17 +11,20 @@ const defaultStoreUrl =
   "https://phpmalbolge.altervista.org/monitor/storeDPOP.php";
 
 async function runDpop(targetUrl = defaultTargetUrl, storeUrl = defaultStoreUrl) {
-  // import dinamico perché puppeteer è ESM
-  const puppeteerModule = await import("puppeteer");
-  const puppeteer = puppeteerModule.default ?? puppeteerModule;
+  console.log("runDpop: starting");
+  console.log("Target URL:", targetUrl);
+  console.log("Store URL:", storeUrl);
+
+  // Path al binario chromium fornito da @sparticuz/chromium
+  const executablePath = await chromium.executablePath();
+
+  console.log("Chromium executablePath:", executablePath);
 
   const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage"
-    ]
+    executablePath,
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    headless: chromium.headless
   });
 
   const page = await browser.newPage();
@@ -34,56 +39,55 @@ async function runDpop(targetUrl = defaultTargetUrl, storeUrl = defaultStoreUrl)
   let storeStatus = null;
 
   page.on("request", async request => {
-    if (dpopFound) return;
-
     const url = request.url();
-    if (!url.includes("entities:search")) return;
 
-    const headers = request.headers();
-    const dpop = headers["dpop"];
-    if (!dpop) return;
+    // log minimale per capire se vediamo qualcosa
+    if (url.includes("entities:search")) {
+      console.log("[REQ] entities:search:", url);
 
-    dpopFound = dpop;
+      const headers = request.headers();
+      const dpop = headers["dpop"];
 
-    try {
-      const fullUrl = `${storeUrl}?DPOP=${encodeURIComponent(dpop)}`;
-      const resp = await fetch(fullUrl);
-      storeStatus = resp.status;
-    } catch (err) {
-      console.error("Errore invio DPoP:", err);
-      storeStatus = "error";
+      if (dpop && !dpopFound) {
+        dpopFound = dpop;
+        console.log("DPoP trovato, lunghezza:", dpop.length);
+
+        try {
+          const fullUrl = `${storeUrl}?DPOP=${encodeURIComponent(dpop)}`;
+          console.log("Invio DPoP a:", fullUrl);
+          const resp = await fetch(fullUrl);
+          storeStatus = resp.status;
+          console.log("Risposta storeDPOP:", storeStatus);
+        } catch (err) {
+          console.error("Errore invio DPoP:", err);
+          storeStatus = "error";
+        }
+      }
     }
   });
 
   try {
+    console.log("Carico pagina Mercari...");
     await page.goto(targetUrl, {
       waitUntil: "domcontentloaded",
-      timeout: 0
+      timeout: 60000
     });
+    console.log("Pagina caricata, attendo 15s per XHR...");
   } catch (err) {
-    console.error("Errore goto:", err.message);
+    console.error("Errore goto Mercari:", err.message);
   }
 
-  // aspetto un po' che partano le XHR
+  // Aspetto un po' che partano le XHR
   await new Promise(r => setTimeout(r, 15000));
 
   await browser.close();
+  console.log("Browser chiuso");
 
-  return { dpopFound, storeStatus };
+  return {
+    status: "ok",
+    dpopFound,
+    storeStatus
+  };
 }
 
-// se lanci da linea di comando: node mercari_dpop.js
-if (require.main === module) {
-  runDpop()
-    .then(res => {
-      console.log("Risultato:", res);
-      process.exit(0);
-    })
-    .catch(err => {
-      console.error("Errore:", err);
-      process.exit(1);
-    });
-}
-
-// esporta per server.js
 module.exports = { runDpop };

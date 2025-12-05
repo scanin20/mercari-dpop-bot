@@ -11,10 +11,7 @@ app.get("/", (req, res) => {
 app.get("/run", async (req, res) => {
   try {
     const result = await runDpop();
-    res.json({
-      status: "ok",
-      ...result
-    });
+    res.json(result);
   } catch (err) {
     console.error("Errore /run:", err);
     res.status(500).json({
