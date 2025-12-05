@@ -1,4 +1,4 @@
-import puppeteer from "puppeteer";
+// netlify/functions/run-mercari-dpop.js
 
 const TARGET_URL =
   process.env.MERCARI_URL ||
@@ -9,6 +9,10 @@ const STORE_URL =
   "https://phpmalbolge.altervista.org/monitor/storeDPOP.php";
 
 async function runDpop() {
+  // import dinamico perché puppeteer è ESM
+  const puppeteerModule = await import("puppeteer");
+  const puppeteer = puppeteerModule.default ?? puppeteerModule;
+
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
@@ -36,13 +40,14 @@ async function runDpop() {
     if (!dpop) return;
 
     dpopFound = dpop;
+
     try {
       const fullUrl = `${STORE_URL}?DPOP=${encodeURIComponent(dpop)}`;
       const resp = await fetch(fullUrl);
       storeStatus = resp.status;
     } catch (err) {
-      storeStatus = "error";
       console.error("Errore invio DPoP:", err);
+      storeStatus = "error";
     }
   });
 
@@ -55,14 +60,16 @@ async function runDpop() {
     console.error("Errore goto:", err.message);
   }
 
+  // aspetta un po' per permettere alle XHR di partire
   await new Promise(r => setTimeout(r, 15000));
+
   await browser.close();
 
   return { dpopFound, storeStatus };
 }
 
-// handler Netlify
-export async function handler(event, context) {
+// handler Netlify in CommonJS
+exports.handler = async (event, context) => {
   try {
     const result = await runDpop();
     return {
@@ -76,7 +83,10 @@ export async function handler(event, context) {
     console.error("Errore generale:", err);
     return {
       statusCode: 500,
-      body: JSON.stringify({ status: "error", message: err.message })
+      body: JSON.stringify({
+        status: "error",
+        message: err.message
+      })
     };
   }
-}
+};
