@@ -1,77 +1,89 @@
-import puppeteer from "puppeteer";
+// mercari_dpop.js
 
-const TARGET_URL = "https://jp.mercari.com/en/search?keyword=ピカチュウ";
-// la tua pagina PHP che salva il token
-const STORE_URL  = "https://phpmalbolge.altervista.org/monitor/storeDPOP.php";
+const defaultTargetUrl =
+  process.env.MERCARI_URL ||
+  "https://jp.mercari.com/en/search?keyword=%E3%83%94%E3%82%AB%E3%83%81%E3%83%A5%E3%82%A6";
 
-(async () => {
-    // per debug puoi mettere headless: false per vedere il browser
-    const browser = await puppeteer.launch({
-        headless: true,
-        // opzionale: aumenta timeout avvio
-        timeout: 60000
-    });
+const defaultStoreUrl =
+  process.env.STORE_URL ||
+  "https://phpmalbolge.altervista.org/monitor/storeDPOP.php";
 
-    const page = await browser.newPage();
+async function runDpop(targetUrl = defaultTargetUrl, storeUrl = defaultStoreUrl) {
+  // import dinamico perché puppeteer è ESM
+  const puppeteerModule = await import("puppeteer");
+  const puppeteer = puppeteerModule.default ?? puppeteerModule;
 
-    // opzionale: user agent simile a un browser reale
-    await page.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    );
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  });
 
-    let dpopFound = false;
+  const page = await browser.newPage();
+  page.setDefaultNavigationTimeout(0);
 
-    // intercettiamo tutte le richieste XHR/fetch
-    page.on("request", async (request) => {
-        const url = request.url();
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  );
 
-        // stessa logica del tuo script: cerchiamo "entities:search"
-        if (url.includes("entities:search")) {
-            const headers = request.headers();
+  let dpopFound = null;
+  let storeStatus = null;
 
-            // chiave in lowercase, come la espone Puppeteer
-            const dpop = headers["dpop"];
+  page.on("request", async request => {
+    if (dpopFound) return;
 
-            if (dpop && !dpopFound) {
-                dpopFound = true;
-                console.log("DPoP trovato, primi 80 caratteri:");
-                console.log(dpop.slice(0, 80) + "...");
+    const url = request.url();
+    if (!url.includes("entities:search")) return;
 
-                try {
-                    const fullUrl = `${STORE_URL}?DPOP=${encodeURIComponent(dpop)}`;
-                    console.log("Invio DPoP a:", fullUrl);
+    const headers = request.headers();
+    const dpop = headers["dpop"];
+    if (!dpop) return;
 
-                    const resp = await fetch(fullUrl);
-                    console.log("Risposta storeDPOP HTTP:", resp.status);
-                } catch (err) {
-                    console.error("Errore durante l invio del DPoP:", err);
-                }
+    dpopFound = dpop;
 
-                // chiudiamo tutto appena abbiamo il token
-                await browser.close();
-                process.exit(0);
-            }
-        }
-    });
-
-    // carichiamo la pagina di ricerca Mercari
     try {
-        await page.goto(TARGET_URL, {
-            waitUntil: "networkidle2",
-            timeout: 60000
-        });
+      const fullUrl = `${storeUrl}?DPOP=${encodeURIComponent(dpop)}`;
+      const resp = await fetch(fullUrl);
+      storeStatus = resp.status;
     } catch (err) {
-        console.error("Errore nel caricamento pagina Mercari:", err);
+      console.error("Errore invio DPoP:", err);
+      storeStatus = "error";
     }
+  });
 
-    // aspetta ancora un po per eventuali XHR ritardate
-    await new Promise((resolve) => setTimeout(resolve, 10000));
+  try {
+    await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 0
+    });
+  } catch (err) {
+    console.error("Errore goto:", err.message);
+  }
 
-    if (!dpopFound) {
-        console.log("Nessun DPoP trovato dalle richieste entities:search");
-    }
+  // aspetto un po' che partano le XHR
+  await new Promise(r => setTimeout(r, 15000));
 
-    await browser.close();
-    process.exit(0);
-})();
+  await browser.close();
+
+  return { dpopFound, storeStatus };
+}
+
+// se lanci da linea di comando: node mercari_dpop.js
+if (require.main === module) {
+  runDpop()
+    .then(res => {
+      console.log("Risultato:", res);
+      process.exit(0);
+    })
+    .catch(err => {
+      console.error("Errore:", err);
+      process.exit(1);
+    });
+}
+
+// esporta per server.js
+module.exports = { runDpop };
