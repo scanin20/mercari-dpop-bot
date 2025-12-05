@@ -2,11 +2,7 @@
   "name": "mercari-dpop-bot",
   "version": "1.0.0",
   "type": "module",
-  "main": "mercari_dpop.js",
-  "scripts": {
-    "start": "node mercari_dpop.js"
-  },
   "dependencies": {
-    "puppeteer": "^23.0.0"
+    "puppeteer": "^24.15.0"
   }
 }
